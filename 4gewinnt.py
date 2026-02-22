@@ -53,15 +53,16 @@ class Game:
 
         return 0
 
-def run()
-
-if __name__ == "__main__":
+def run():
     game = Game()
     turn = 1
     while game.winner() == 0:
         os.system("clear; clear")
         game.move(turn, random.randint(0, 6))
         game.draw()
+        
         turn = turn % 2 + 1
         time.sleep(0.2)
-    
+
+if __name__ == "__main__":
+    run()
