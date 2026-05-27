@@ -2,14 +2,32 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <string.h>
+#include <unistd.h>
 
-#include "input.c"
-
+#define BOT_MAX_DEPTH 2
 #define WINNING 4
 #define W 7
 #define H 6
+#define SHOW_PROGRESS false
 
 enum Cell { EMPTY, RED, YELLOW };
+
+struct Situation {
+    enum Cell board[H][W];
+    int move;
+};
+
+void enable_raw_mode();
+void disable_raw_mode();
+
+struct Situation *memory = NULL;
+int memory_length = 0;
+
+void memorize(enum Cell board[H][W], int move) {
+    memory_length++;
+    memory = realloc(memory, memory_length * sizeof(struct Situation));
+    
+}
 
 void draw(enum Cell board[H][W], enum Cell player, int pointer_x) {
     printf("\033[%dF  ", H + 3);
@@ -26,22 +44,21 @@ void draw(enum Cell board[H][W], enum Cell player, int pointer_x) {
         }
         printf("\033[0m ");
     }
-    
+
     printf("\n╒═");
     for (int i = 0; i < W; i++) printf("══");
     printf("╕\n");
 
-    bool pointer_set = false;
     for (int y = H - 1; y >= 0; y--) {
         printf("│ ");
         for (int x = 0; x < W; x++) {
-            enum Cell player = board[y][x];
-            if (player == EMPTY) {
+            enum Cell cell = board[y][x];
+            if (cell == EMPTY) {
                 printf("\033[90m◌");
             } else {
-                if (player == RED) {
+                if (cell == RED) {
                     printf("\033[31m");
-                } else if (player == YELLOW) {
+                } else if (cell == YELLOW) {
                     printf("\033[33m");
                 }
                 printf("◉");
@@ -117,6 +134,15 @@ enum Cell winner(enum Cell board[H][W]) {
     return EMPTY;
 }
 
+bool is_legal(enum Cell board[H][W], int x) {
+    for (int y = 0; y < H; y++) {
+        if (board[y][x] == EMPTY) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool move(enum Cell board[H][W], enum Cell player, int x) {
     for (int y = 0; y < H; y++) {
         if (board[y][x] == EMPTY) {
@@ -127,19 +153,116 @@ bool move(enum Cell board[H][W], enum Cell player, int x) {
     return false;
 }
 
-void human(enum Cell board[H][W], enum Cell player) {
+bool board_is_full(enum Cell board[H][W]) {
+    for (int y = 0; y < H; y++) {
+        for (int x = 0; x < W; x++) {
+            if (board[y][x] == EMPTY) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+struct BotReport {
+    bool wins;
+    bool loses;
+    bool legal;
+    int moves;
+    int move;
+};
+
+int bot_recursion(enum Cell board[H][W], enum Cell player, int depth) {
+    struct BotReport reports[W];
+
+    for (int i = 0; i < W; i++) {
+        if (depth == 0 && SHOW_PROGRESS) {
+            printf("%d\n", i);
+        }
+
+        enum Cell test_board[H][W];
+        memcpy(test_board, board, sizeof(test_board));
+
+        enum Cell test_player = player;
+
+        bool moved = move(test_board, test_player, i);
+        int count = 1;
+        bool wins = false;
+        bool loses = false;
+
+        if (moved) {
+            enum Cell test_winner = EMPTY;
+            while (test_winner == EMPTY && !board_is_full(test_board)) {
+                if (test_player == RED) test_player = YELLOW;
+                else test_player = RED;
+
+                int test_move;
+                if (depth < BOT_MAX_DEPTH) {
+                    test_move = bot_recursion(test_board, test_player, depth + 1);
+                } else {
+                    for (int i = 0; i < W; i++) {
+                        if (is_legal(test_board, i)) {
+                            test_move = i;
+                            if (depth == 0) printf("nigga i give up\n");
+                        }
+                    }
+                }
+                move(test_board, test_player, test_move);
+
+                count++;
+                test_winner = winner(test_board);
+            }
+            if (test_winner == player) {
+                wins = true;
+            } else if (test_winner != EMPTY) {
+                loses = true;
+            }
+        }
+
+        reports[i] = (struct BotReport){
+            .wins = wins,
+            .loses = loses,
+            .legal = moved,
+            .moves = count,
+            .move = i
+        };
+    }
+
+    struct BotReport best = reports[0];
+    for (int i = 1; i < W; i++) {
+        struct BotReport this_one = reports[i];
+        if (this_one.legal) {
+            if (!best.legal) {
+                best = this_one;
+            } else if (this_one.wins) {
+                if (!best.wins || this_one.moves < best.moves) {
+                    best = this_one;
+                }
+            } else if (best.loses) {
+                if(!this_one.loses || this_one.moves > best.moves) {
+                    best = this_one;
+                }
+            }
+        }
+    }
+
+    if (depth == 0 && SHOW_PROGRESS) {
+        printf("\n\n\n\n\n\n\n\n\n");
+    }
+
+    return best.move;
+}
+
+int human(enum Cell board[H][W], enum Cell player) {
     int pointer_x = 3;
     draw(board, player, pointer_x);
     enable_raw_mode();
     while (1) {
         char c;
         read(STDIN_FILENO, &c, 1);
-        if (c == 'q') {
-            break;
-        } else if (c == '\r' || c == '\n' || c == ' ') {
-            bool moved = move(board, player, pointer_x);
-            draw(board, player, pointer_x);
-            if (moved) return;
+        if (c == '\r' || c == '\n' || c == ' ') {
+            bool legal = is_legal(board, pointer_x);
+            if (legal) return pointer_x;
         } else if (c == '\033') {
             char seq[2];
             read(STDIN_FILENO, &seq[0], 1);
@@ -156,48 +279,47 @@ void human(enum Cell board[H][W], enum Cell player) {
             }
         }
     }
+    return 0;
 }
 
-bool bot_recursion(enum Cell board[H][W], enum Cell player, int depth) {
-
-    for (int i = 0; i < W; i++) {
-    
-        enum Cell test_board[H][W];
-        memcpy(test_board, board, sizeof(test_board));
-        int test_player;
-        if (player == 1) test_player = 2;
-        else test_player = 1;
-        
-        move(test_board, test_player, i);
-    }
-
-    return true;
+int recursive_bot(enum Cell board[H][W], enum Cell player) {
+    return bot_recursion(board, player, 0);
 }
 
-void bot(enum Cell board[H][W], enum Cell player) {
-    bot_recursion(board, player, 0);
-    move(board, player, 3);
-}
+#include "ai-slop.c"
 
-int main() {
-    enum Cell board[H][W] = {EMPTY};
+enum Cell play(
+    int (*p1)(enum Cell (*board)[W], enum Cell),
+    int (*p2)(enum Cell (*board)[W], enum Cell)
+) {
+    enum Cell board[H][W] = {{EMPTY}};
     enum Cell turn = RED;
 
     for (int i = 0; i < H + 3; i++) printf("\n");
 
-    while (winner(board) == EMPTY) {
+    while (winner(board) == EMPTY && !board_is_full(board)) {
+        int the_move;
         if (turn == RED) {
-            human(board, turn);
+            the_move = p1(board, turn);
         } else {
-            bot(board, turn);
+            the_move = p2(board, turn);
         }
+        move(board, turn, the_move);
         draw(board, EMPTY, -1);
 
         if (turn == 1) turn = 2;
         else turn = 1;
     }
 
-    printf("%d\n", winner(board));
+    free(memory);
+    return winner(board);
+}
+
+
+
+int main() {
+
+    printf("%d\n", play(recursive_bot, recursive_bot));
 
     return 0;
 }
