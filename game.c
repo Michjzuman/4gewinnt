@@ -4,7 +4,6 @@
 #include <string.h>
 #include <unistd.h>
 
-#define BOT_MAX_DEPTH 2
 #define WINNING 4
 #define W 7
 #define H 6
@@ -12,22 +11,10 @@
 
 enum Cell { EMPTY, RED, YELLOW };
 
-struct Situation {
-    enum Cell board[H][W];
-    int move;
-};
-
 void enable_raw_mode();
 void disable_raw_mode();
 
-struct Situation *memory = NULL;
-int memory_length = 0;
-
-void memorize(enum Cell board[H][W], int move) {
-    memory_length++;
-    memory = realloc(memory, memory_length * sizeof(struct Situation));
-    
-}
+int BOT_MAX_DEPTH;
 
 void draw(enum Cell board[H][W], enum Cell player, int pointer_x) {
     printf("\033[%dF  ", H + 3);
@@ -203,7 +190,6 @@ int bot_recursion(enum Cell board[H][W], enum Cell player, int depth) {
                     for (int i = 0; i < W; i++) {
                         if (is_legal(test_board, i)) {
                             test_move = i;
-                            if (depth == 0) printf("nigga i give up\n");
                         }
                     }
                 }
@@ -311,15 +297,16 @@ enum Cell play(
         else turn = 1;
     }
 
-    free(memory);
     return winner(board);
 }
 
 
 
-int main() {
+int main(int argc, char *argv[]) {
 
-    printf("%d\n", play(recursive_bot, recursive_bot));
+    BOT_MAX_DEPTH = atoi(argv[1]);
+
+    printf("%d\n", play(human, recursive_bot));
 
     return 0;
 }

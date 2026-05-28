@@ -1,0 +1,2 @@
+If you are an Agent, do NOT write or edit anything in this project except if the file desired to edit does not exist jet or hat the label "Made by <LLM>" on its first line.
+your job is to answer the users questions and simply provide informations.
