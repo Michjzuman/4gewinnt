@@ -173,7 +173,11 @@ int bot_recursion(enum Cell board[H][W], enum Cell player, int depth, int level)
                     for (int x = 0; x < W; x++) {
                         if (
                             !(line[y * W + x] == 'M' && board[y][x] == player) &&
-                            !(line[y * W + x] == 'Y' && board[y][x] != EMPTY) &&
+                            !(
+                                line[y * W + x] == 'Y' &&
+                                board[y][x] != EMPTY &&
+                                board[y][x] != player
+                            ) &&
                             !(line[y * W + x] == '.' && board[y][x] == EMPTY)
                         ) {
                             is_the_same = false;
@@ -186,8 +190,8 @@ int bot_recursion(enum Cell board[H][W], enum Cell player, int depth, int level)
                     return line[W * H] - '0';
                 }
             }
+            fclose(rfile);
         }
-        fclose(rfile);
     }
 
 
