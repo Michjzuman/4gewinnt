@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include <unistd.h>
+#include <time.h>
 
 #define WINNING 4
 #define W 7
@@ -13,8 +14,6 @@ enum Cell { EMPTY, RED, YELLOW };
 
 void enable_raw_mode();
 void disable_raw_mode();
-
-int BOT_MAX_DEPTH;
 
 void draw(enum Cell board[H][W], enum Cell player, int pointer_x) {
     printf("\033[%dF  ", H + 3);
@@ -159,7 +158,39 @@ struct BotReport {
     int move;
 };
 
-int bot_recursion(enum Cell board[H][W], enum Cell player, int depth) {
+int bot_recursion(enum Cell board[H][W], enum Cell player, int depth, int level) {
+
+    char name[] = "memoryX.67";
+    name[6] = level + '0';
+
+    if (depth == 0) {
+        FILE *rfile = fopen(name, "r");
+        if (rfile != NULL) {
+            char line[256] = {0};
+            while (fgets(line, sizeof(line), rfile) != NULL) {
+                bool is_the_same = true;
+                for (int y = 0; y < H; y++) {
+                    for (int x = 0; x < W; x++) {
+                        if (
+                            !(line[y * W + x] == 'M' && board[y][x] == player) &&
+                            !(line[y * W + x] == 'Y' && board[y][x] != EMPTY) &&
+                            !(line[y * W + x] == '.' && board[y][x] == EMPTY)
+                        ) {
+                            is_the_same = false;
+                            break;
+                        }
+                    }
+                    if (!is_the_same) break;
+                }
+                if (is_the_same) {
+                    return line[W * H] - '0';
+                }
+            }
+        }
+        fclose(rfile);
+    }
+
+
     struct BotReport reports[W];
 
     for (int i = 0; i < W; i++) {
@@ -184,8 +215,8 @@ int bot_recursion(enum Cell board[H][W], enum Cell player, int depth) {
                 else test_player = RED;
 
                 int test_move;
-                if (depth < BOT_MAX_DEPTH) {
-                    test_move = bot_recursion(test_board, test_player, depth + 1);
+                if (depth < level) {
+                    test_move = bot_recursion(test_board, test_player, depth + 1, level);
                 } else {
                     for (int i = 0; i < W; i++) {
                         if (is_legal(test_board, i)) {
@@ -236,6 +267,23 @@ int bot_recursion(enum Cell board[H][W], enum Cell player, int depth) {
         printf("\n\n\n\n\n\n\n\n\n");
     }
 
+    if (depth == 0) {
+        FILE *afile = fopen(name, "a");
+        for (int y = 0; y < H; y++) {
+            for (int x = 0; x < W; x++) {
+                if (board[y][x] == 0) {
+                    fprintf(afile, ".");
+                } else if (board[y][x] == player) {
+                    fprintf(afile, "M");
+                } else {
+                    fprintf(afile, "Y");
+                }
+            }
+        }
+        fprintf(afile, "%d\n", best.move);
+        fclose(afile);
+    }
+
     return best.move;
 }
 
@@ -268,8 +316,32 @@ int human(enum Cell board[H][W], enum Cell player) {
     return 0;
 }
 
-int recursive_bot(enum Cell board[H][W], enum Cell player) {
-    return bot_recursion(board, player, 0);
+int recursive_bot(enum Cell board[H][W], enum Cell player, int level) {
+    return bot_recursion(board, player, 0, level);
+}
+
+int bot2(enum Cell board[H][W], enum Cell player) {
+    return recursive_bot(board, player, 2);
+}
+
+int bot3(enum Cell board[H][W], enum Cell player) {
+    return recursive_bot(board, player, 3);
+}
+
+int bot4(enum Cell board[H][W], enum Cell player) {
+    return recursive_bot(board, player, 4);
+}
+
+int bot5(enum Cell board[H][W], enum Cell player) {
+    return recursive_bot(board, player, 5);
+}
+
+int jonkler(enum Cell board[H][W], enum Cell player) {
+    int result = rand() % W;
+    while (!is_legal(board, result)) {
+        result = rand() % W;
+    }
+    return result;
 }
 
 #include "ai-slop.c"
@@ -302,11 +374,24 @@ enum Cell play(
 
 
 
-int main(int argc, char *argv[]) {
+int main() {
+    srand(time(NULL));
 
-    BOT_MAX_DEPTH = atoi(argv[1]);
+    //while (true) {
+    //    printf("%d\n", play(bot4, jonkler));
+    //    printf("%d\n", play(jonkler, bot4));
+    //    printf("%d\n", play(bot4, jonkler));
+    //    printf("%d\n", play(jonkler, bot4));
+    //    printf("%d\n", play(bot4, jonkler));
+    //    printf("%d\n", play(jonkler, bot4));
+    //    printf("%d\n", play(bot4, gemma4));
+    //    printf("%d\n", play(gemma4, bot4));
+    //}
 
-    printf("%d\n", play(human, recursive_bot));
+
+    printf("%d\n", play(human, bot4));
 
     return 0;
 }
+
+// add mirror
