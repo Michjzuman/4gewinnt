@@ -4,6 +4,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <time.h>
+#include <pthread.h>
 
 #define WINNING 4
 #define W 7
@@ -158,11 +159,79 @@ struct BotReport {
     int move;
 };
 
-int bot_recursion(enum Cell board[H][W], enum Cell player, int depth, int level) {
+int bot_recursion(enum Cell board[H][W], enum Cell player, int depth, int level, bool multicore);
 
+struct BotArgs {
+    int i;
+    struct BotReport *reports;
+    enum Cell (*board)[W];
+    enum Cell player;
+    int depth;
+    int level;
+    bool multicore;
+};
+
+void bot_recursion_line(struct BotArgs args);
+
+void *bot_worker(void *arg) {
+    struct BotArgs *args = (struct BotArgs *)arg;
+    bot_recursion_line(*args);
+    return NULL;
+}
+
+void bot_recursion_line(struct BotArgs args) {
+    enum Cell test_board[H][W];
+    memcpy(test_board, args.board, sizeof(test_board));
+
+    enum Cell test_player = args.player;
+
+    bool moved = move(test_board, test_player, args.i);
+    int count = 1;
+    bool wins = false;
+    bool loses = false;
+
+    if (moved) {
+        enum Cell test_winner = winner(test_board);
+        while (test_winner == EMPTY && !board_is_full(test_board)) {
+            if (test_player == RED) test_player = YELLOW;
+            else test_player = RED;
+
+            int test_move;
+            if (args.depth < args.level) {
+                test_move = bot_recursion(test_board, test_player, args.depth + 1, args.level, args.multicore);
+            } else {
+                for (int i = 0; i < W; i++) {
+                    if (is_legal(test_board, i)) {
+                        test_move = i;
+                    }
+                }
+            }
+            move(test_board, test_player, test_move);
+
+            count++;
+            test_winner = winner(test_board);
+        }
+        if (test_winner == args.player) {
+            wins = true;
+        } else if (test_winner != EMPTY) {
+            loses = true;
+        }
+    }
+
+    args.reports[args.i] = (struct BotReport){
+        .wins = wins,
+        .loses = loses,
+        .legal = moved,
+        .moves = count,
+        .move = args.i
+    };
+}
+
+int bot_recursion(enum Cell board[H][W], enum Cell player, int depth, int level, bool multicore) {
     char name[] = "memoryX.67";
     name[6] = level + '0';
 
+    // search memory
     if (depth == 0) {
         FILE *rfile = fopen(name, "r");
         if (rfile != NULL) {
@@ -187,6 +256,8 @@ int bot_recursion(enum Cell board[H][W], enum Cell player, int depth, int level)
                     if (!is_the_same) break;
                 }
                 if (is_the_same) {
+                    //usleep(200000);
+                    fclose(rfile);
                     return line[W * H] - '0';
                 }
             }
@@ -194,61 +265,46 @@ int bot_recursion(enum Cell board[H][W], enum Cell player, int depth, int level)
         }
     }
 
-
+    // think
     struct BotReport reports[W];
-
-    for (int i = 0; i < W; i++) {
-        if (depth == 0 && SHOW_PROGRESS) {
-            printf("%d\n", i);
+    if (depth == 0 && multicore) {
+        pthread_t threads[W];
+        struct BotArgs args[W];
+        for (int i = 0; i < W; i++) {
+            if (SHOW_PROGRESS) printf("%d\n", i + 1);
+            args[i] = (struct BotArgs){
+                .reports = reports,
+                .board = board,
+                .i = i,
+                .level = level,
+                .player = player,
+                .depth = depth,
+                .multicore = multicore
+            };
+            pthread_create(&threads[i], NULL, bot_worker, &args[i]);
         }
-
-        enum Cell test_board[H][W];
-        memcpy(test_board, board, sizeof(test_board));
-
-        enum Cell test_player = player;
-
-        bool moved = move(test_board, test_player, i);
-        int count = 1;
-        bool wins = false;
-        bool loses = false;
-
-        if (moved) {
-            enum Cell test_winner = EMPTY;
-            while (test_winner == EMPTY && !board_is_full(test_board)) {
-                if (test_player == RED) test_player = YELLOW;
-                else test_player = RED;
-
-                int test_move;
-                if (depth < level) {
-                    test_move = bot_recursion(test_board, test_player, depth + 1, level);
-                } else {
-                    for (int i = 0; i < W; i++) {
-                        if (is_legal(test_board, i)) {
-                            test_move = i;
-                        }
-                    }
-                }
-                move(test_board, test_player, test_move);
-
-                count++;
-                test_winner = winner(test_board);
-            }
-            if (test_winner == player) {
-                wins = true;
-            } else if (test_winner != EMPTY) {
-                loses = true;
-            }
+        for (int i = 0; i < W; i++) {
+            pthread_join(threads[i], NULL);
         }
+    } else {
+        for (int i = 0; i < W; i++) {
+            if (SHOW_PROGRESS && depth == 0) printf("%d\n", i + 1);
 
-        reports[i] = (struct BotReport){
-            .wins = wins,
-            .loses = loses,
-            .legal = moved,
-            .moves = count,
-            .move = i
-        };
+            struct BotArgs args = {
+                .reports = reports,
+                .board = board,
+                .i = i,
+                .level = level,
+                .player = player,
+                .depth = depth,
+                .multicore = multicore
+            };
+
+            bot_recursion_line(args);
+        }
     }
 
+    // decide
     struct BotReport best = reports[0];
     for (int i = 1; i < W; i++) {
         struct BotReport this_one = reports[i];
@@ -267,10 +323,23 @@ int bot_recursion(enum Cell board[H][W], enum Cell player, int depth, int level)
         }
     }
 
+    bool hope = false;
+    bool danger = false;
+    for (int i = 0; i < W; i++) {
+        struct BotReport this_one = reports[i];
+        if (this_one.wins) {
+            hope = true;
+        }
+        if (this_one.loses) {
+            danger = true;
+        }
+    }
+
     if (depth == 0 && SHOW_PROGRESS) {
         printf("\n\n\n\n\n\n\n\n\n");
     }
 
+    // memorize
     if (depth == 0) {
         FILE *afile = fopen(name, "a");
         for (int y = 0; y < H; y++) {
@@ -284,12 +353,25 @@ int bot_recursion(enum Cell board[H][W], enum Cell player, int depth, int level)
                 }
             }
         }
-        fprintf(afile, "%d\n", best.move);
+        fprintf(afile, "%d", best.move);
+        if (danger && !hope) {
+            fprintf(afile, " 💀");
+        } else if (hope && !danger) {
+            fprintf(afile, " 🔥");
+        }
+        fprintf(afile, "\n");
         fclose(afile);
     }
 
     return best.move;
 }
+
+int recursive_bot(enum Cell board[H][W], enum Cell player, int level, bool multicore) {
+    return bot_recursion(board, player, 0, level, multicore);
+}
+
+
+// player options
 
 int human(enum Cell board[H][W], enum Cell player) {
     int pointer_x = 3;
@@ -300,6 +382,7 @@ int human(enum Cell board[H][W], enum Cell player) {
         read(STDIN_FILENO, &c, 1);
         if (c == '\r' || c == '\n' || c == ' ') {
             bool legal = is_legal(board, pointer_x);
+            disable_raw_mode();
             if (legal) return pointer_x;
         } else if (c == '\033') {
             char seq[2];
@@ -317,27 +400,28 @@ int human(enum Cell board[H][W], enum Cell player) {
             }
         }
     }
+    disable_raw_mode();
     return 0;
 }
 
-int recursive_bot(enum Cell board[H][W], enum Cell player, int level) {
-    return bot_recursion(board, player, 0, level);
+int bot2(enum Cell board[H][W], enum Cell player) {
+    return recursive_bot(board, player, 2, false);
 }
 
-int bot2(enum Cell board[H][W], enum Cell player) {
-    return recursive_bot(board, player, 2);
+int bot3_mini(enum Cell board[H][W], enum Cell player) {
+    return recursive_bot(board, player, 3, false);
 }
 
 int bot3(enum Cell board[H][W], enum Cell player) {
-    return recursive_bot(board, player, 3);
+    return recursive_bot(board, player, 3, true);
 }
 
 int bot4(enum Cell board[H][W], enum Cell player) {
-    return recursive_bot(board, player, 4);
+    return recursive_bot(board, player, 4, true);
 }
 
 int bot5(enum Cell board[H][W], enum Cell player) {
-    return recursive_bot(board, player, 5);
+    return recursive_bot(board, player, 5, true);
 }
 
 int jonkler(enum Cell board[H][W], enum Cell player) {
@@ -349,6 +433,22 @@ int jonkler(enum Cell board[H][W], enum Cell player) {
 }
 
 #include "ai-slop.c"
+
+struct Player {
+    char name[20];
+    int (*controller)(enum Cell (*board)[W], enum Cell);
+};
+
+struct Player players[] = {
+    {"human", human},
+    {"jonkler", jonkler},
+    {"bot2", bot2},
+    {"bot3", bot3},
+    {"gemma4", gemma4},
+    {"bot4", bot4},
+    {"slop_bot", slop_bot},
+    {"bot5", bot5}
+};
 
 enum Cell play(
     int (*p1)(enum Cell (*board)[W], enum Cell),
@@ -376,26 +476,93 @@ enum Cell play(
     return winner(board);
 }
 
+void menu() {
+    int pointer_x = 0;
+    int pointer_y[] = {0, 0};
+    int max_len = 0;
+    int amount = sizeof(players) / sizeof(struct Player);
+    for (int i = 0; i < amount; i++) {
+        if (max_len < strlen(players[i].name)) {
+            max_len = strlen(players[i].name);
+        }
+        printf("\n");
+    }
+    printf("\n");
 
+    enable_raw_mode();
+    while (true) {
+        printf("\033[%dF\n", amount + 1);
+        for (int y = 0; y < amount; y++) {
+            for (int x = 0; x < 2; x++) {
+                if (pointer_y[x] == y) {
+                    if (pointer_x == x) {
+                        printf("\033[44m\033[1m");
+                    } else {
+                        printf("\033[100m");
+                    }
+                }
+                printf("%s", players[y].name);
+                for (int x = 0; x < max_len - strlen(players[y].name); x++) {
+                    printf(" ");
+                }
+                printf("\033[0m  ");
+            }
+            printf("\n");
+        }
+        char c;
+        read(STDIN_FILENO, &c, 1);
+        if (c == '\r' || c == '\n' || c == ' ') {
+            int result = play(
+                players[pointer_y[0]].controller,
+                players[pointer_y[1]].controller
+            );
+            printf("\n\033[32m");
+            if (result == 0) {
+                printf("nobody");
+            } else {
+                printf("%s", players[pointer_y[result - 1]].name);
+            }
+            printf(" won!\033[0m\n\n");
+            for (int y = 0; y < amount; y++) {
+                printf("\n");
+            }
+        } else if (c == '\033') {
+            char seq[2];
+            read(STDIN_FILENO, &seq[0], 1);
+            read(STDIN_FILENO, &seq[1], 1);
+            if (seq[0] == '[') {
+                if (seq[1] == 'A') {
+                    pointer_y[pointer_x] = (
+                        pointer_y[pointer_x] - 1 + amount
+                    ) % amount;
+                } else if (seq[1] == 'B') {
+                    pointer_y[pointer_x] = (
+                        pointer_y[pointer_x] + 1 + amount
+                    ) % amount;
+                } else if (seq[1] == 'C') {
+                    pointer_x = (
+                        pointer_x + 1 + 2
+                    ) % 2;
+                } else if (seq[1] == 'D') {
+                    pointer_x = (
+                        pointer_x - 1 + 2
+                    ) % 2;
+                }
+            }
+        }
+    }
+    disable_raw_mode();
+}
 
 int main() {
     srand(time(NULL));
 
-    //while (true) {
-    //    printf("%d\n", play(bot4, jonkler));
-    //    printf("%d\n", play(jonkler, bot4));
-    //    printf("%d\n", play(bot4, jonkler));
-    //    printf("%d\n", play(jonkler, bot4));
-    //    printf("%d\n", play(bot4, jonkler));
-    //    printf("%d\n", play(jonkler, bot4));
-    //    printf("%d\n", play(bot4, gemma4));
-    //    printf("%d\n", play(gemma4, bot4));
-    //}
+    // printf("%d\n", play(bot5, bot5));
 
-
-    printf("%d\n", play(human, bot4));
+    menu();
 
     return 0;
 }
 
 // add mirror
+// add player selection
