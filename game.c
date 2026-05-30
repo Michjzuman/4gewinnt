@@ -238,6 +238,7 @@ int bot_recursion(enum Cell board[H][W], enum Cell player, int depth, int level,
             char line[256] = {0};
             while (fgets(line, sizeof(line), rfile) != NULL) {
                 bool is_the_same = true;
+                bool is_mirrored = true;
                 for (int y = 0; y < H; y++) {
                     for (int x = 0; x < W; x++) {
                         if (
@@ -250,15 +251,30 @@ int bot_recursion(enum Cell board[H][W], enum Cell player, int depth, int level,
                             !(line[y * W + x] == '.' && board[y][x] == EMPTY)
                         ) {
                             is_the_same = false;
-                            break;
+                        }
+                        if (
+                            !(line[y * W + (W - 1 - x)] == 'M' && board[y][x] == player) &&
+                            !(
+                                line[y * W + (W - 1 - x)] == 'Y' &&
+                                board[y][x] != EMPTY &&
+                                board[y][x] != player
+                            ) &&
+                            !(line[y * W + (W - 1 - x)] == '.' && board[y][x] == EMPTY)
+                        ) {
+                            is_mirrored = false;
                         }
                     }
-                    if (!is_the_same) break;
+                    if (!is_the_same && !is_mirrored) break;
                 }
-                if (is_the_same) {
+                if (is_the_same || is_mirrored) {
                     //usleep(200000);
                     fclose(rfile);
-                    return line[W * H] - '0';
+                    if (is_the_same) {
+                        return line[W * H] - '0';
+                    }
+                    if (is_mirrored) {
+                        return W - 1 - (line[W * H] - '0');
+                    }
                 }
             }
             fclose(rfile);
@@ -563,6 +579,3 @@ int main() {
 
     return 0;
 }
-
-// add mirror
-// add player selection
