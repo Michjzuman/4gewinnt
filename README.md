@@ -23,3 +23,4 @@ And then you run it:
 |bot5|A bot that predicts 5 moves (requires a good CPU with at least 8 cores)|
 |slop_bot|A bot that was vibecoded with GPT-5.5|
 |gemma4|Gemma4:e2b over ollama (needs to be installed via ollama)|
+|peak_bot|A bot that predicts EVERY move|

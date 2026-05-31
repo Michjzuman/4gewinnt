@@ -159,7 +159,7 @@ struct BotReport {
     int move;
 };
 
-int bot_recursion(enum Cell board[H][W], enum Cell player, int depth, int level, bool multicore);
+int bot_recursion(enum Cell board[H][W], enum Cell player, int depth, int level, bool multicore, bool peak);
 
 struct BotArgs {
     int i;
@@ -169,6 +169,7 @@ struct BotArgs {
     int depth;
     int level;
     bool multicore;
+    bool peak;
 };
 
 void bot_recursion_line(struct BotArgs args);
@@ -197,8 +198,8 @@ void bot_recursion_line(struct BotArgs args) {
             else test_player = RED;
 
             int test_move;
-            if (args.depth < args.level) {
-                test_move = bot_recursion(test_board, test_player, args.depth + 1, args.level, args.multicore);
+            if (args.depth < args.level || args.peak) {
+                test_move = bot_recursion(test_board, test_player, args.depth + 1, args.level, args.multicore, args.peak);
             } else {
                 for (int i = 0; i < W; i++) {
                     if (is_legal(test_board, i)) {
@@ -227,12 +228,12 @@ void bot_recursion_line(struct BotArgs args) {
     };
 }
 
-int bot_recursion(enum Cell board[H][W], enum Cell player, int depth, int level, bool multicore) {
+int bot_recursion(enum Cell board[H][W], enum Cell player, int depth, int level, bool multicore, bool peak) {
     char name[] = "memoryX.67";
     name[6] = level + '0';
 
     // search memory
-    if (depth == 0) {
+    if (depth == 0 || peak) {
         FILE *rfile = fopen(name, "r");
         if (rfile != NULL) {
             char line[256] = {0};
@@ -295,7 +296,8 @@ int bot_recursion(enum Cell board[H][W], enum Cell player, int depth, int level,
                 .level = level,
                 .player = player,
                 .depth = depth,
-                .multicore = multicore
+                .multicore = multicore,
+                .peak = peak
             };
             pthread_create(&threads[i], NULL, bot_worker, &args[i]);
         }
@@ -313,7 +315,8 @@ int bot_recursion(enum Cell board[H][W], enum Cell player, int depth, int level,
                 .level = level,
                 .player = player,
                 .depth = depth,
-                .multicore = multicore
+                .multicore = multicore,
+                .peak = peak
             };
 
             bot_recursion_line(args);
@@ -356,7 +359,7 @@ int bot_recursion(enum Cell board[H][W], enum Cell player, int depth, int level,
     }
 
     // memorize
-    if (depth == 0) {
+    if (depth == 0 || peak) {
         FILE *afile = fopen(name, "a");
         for (int y = 0; y < H; y++) {
             for (int x = 0; x < W; x++) {
@@ -370,11 +373,11 @@ int bot_recursion(enum Cell board[H][W], enum Cell player, int depth, int level,
             }
         }
         fprintf(afile, "%d", best.move);
-        if (danger && !hope) {
-            fprintf(afile, " 💀");
-        } else if (hope && !danger) {
-            fprintf(afile, " 🔥");
-        }
+        //if (danger && !hope) {
+        //    fprintf(afile, " 💀");
+        //} else if (hope && !danger) {
+        //    fprintf(afile, " 🔥");
+        //}
         fprintf(afile, "\n");
         fclose(afile);
     }
@@ -382,8 +385,8 @@ int bot_recursion(enum Cell board[H][W], enum Cell player, int depth, int level,
     return best.move;
 }
 
-int recursive_bot(enum Cell board[H][W], enum Cell player, int level, bool multicore) {
-    return bot_recursion(board, player, 0, level, multicore);
+int recursive_bot(enum Cell board[H][W], enum Cell player, int level, bool multicore, bool peak) {
+    return bot_recursion(board, player, 0, level, multicore, peak);
 }
 
 
@@ -421,23 +424,27 @@ int human(enum Cell board[H][W], enum Cell player) {
 }
 
 int bot2(enum Cell board[H][W], enum Cell player) {
-    return recursive_bot(board, player, 2, false);
+    return recursive_bot(board, player, 2, false, false);
 }
 
 int bot3_mini(enum Cell board[H][W], enum Cell player) {
-    return recursive_bot(board, player, 3, false);
+    return recursive_bot(board, player, 3, false, false);
 }
 
 int bot3(enum Cell board[H][W], enum Cell player) {
-    return recursive_bot(board, player, 3, true);
+    return recursive_bot(board, player, 3, true, false);
 }
 
 int bot4(enum Cell board[H][W], enum Cell player) {
-    return recursive_bot(board, player, 4, true);
+    return recursive_bot(board, player, 4, true, false);
 }
 
 int bot5(enum Cell board[H][W], enum Cell player) {
-    return recursive_bot(board, player, 5, true);
+    return recursive_bot(board, player, 5, true, false);
+}
+
+int peak_bot(enum Cell board[H][W], enum Cell player) {
+    return recursive_bot(board, player, 0, false, true);
 }
 
 int jonkler(enum Cell board[H][W], enum Cell player) {
@@ -458,12 +465,13 @@ struct Player {
 struct Player players[] = {
     {"human", human},
     {"jonkler", jonkler},
+    {"gemma4", gemma4},
     {"bot2", bot2},
     {"bot3", bot3},
-    {"gemma4", gemma4},
     {"bot4", bot4},
+    {"bot5", bot5},
     {"slop_bot", slop_bot},
-    {"bot5", bot5}
+    {"peak_bot", peak_bot}
 };
 
 enum Cell play(
