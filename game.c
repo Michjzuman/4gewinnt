@@ -12,9 +12,19 @@
 #define SHOW_PROGRESS false
 
 enum Cell { EMPTY, RED, YELLOW };
+enum RelativeCell { NOBODY, ME, YOU };
 
 void enable_raw_mode();
 void disable_raw_mode();
+
+struct Situation {
+    enum RelativeCell board[H][W];
+    int move;
+};
+
+struct Situation *peak_bot_memory = NULL;
+int peak_bot_memory_length = 0;
+bool peak_bot_memory_set = false;
 
 void draw(enum Cell board[H][W], enum Cell player, int pointer_x) {
     printf("\033[%dF  ", H + 3);
@@ -233,11 +243,33 @@ int bot_recursion(enum Cell board[H][W], enum Cell player, int depth, int level,
     name[6] = level + '0';
 
     // search memory
-    if (depth == 0 || peak) {
+    if (depth == 0) {
         FILE *rfile = fopen(name, "r");
         if (rfile != NULL) {
             char line[256] = {0};
             while (fgets(line, sizeof(line), rfile) != NULL) {
+                if (peak && !peak_bot_memory_set) {
+                    // YYMMYMYMYMMYY..YMYM...MYYY...MYY....MMM...6
+
+                    struct Situation situation;
+
+                    for (int i = 0; i < W * H; i++) {
+                        if (line[i] == 'M') {
+                            situation.board[i / W][i % W] = ME;
+                        } else if (line[i] == 'Y') {
+                            situation.board[i / W][i % W] = YOU;
+                        } else {
+                            situation.board[i / W][i % W] = NOBODY;
+                        }
+                             // i was here
+                    }
+
+                    situation.move = line[W * H] - '0';
+
+                    peak_bot_memory_length++;
+                    peak_bot_memory = realloc(peak_bot_memory, peak_bot_memory_length * sizeof(struct Situation));
+                    peak_bot_memory[peak_bot_memory_length - 1] = situation;
+                }
                 bool is_the_same = true;
                 bool is_mirrored = true;
                 for (int y = 0; y < H; y++) {
@@ -281,6 +313,47 @@ int bot_recursion(enum Cell board[H][W], enum Cell player, int depth, int level,
             fclose(rfile);
         }
     }
+    peak_bot_memory_set = true;
+
+    // peak_bot search stored memory
+    if (peak && depth > 0) {
+        for (int i = 0; i < peak_bot_memory_length; i++) {
+            bool is_the_same = true;
+            bool is_mirrored = true;
+
+            // peak_bot_memory[i].board == board
+            for (int y = 0; y < H; y++) {
+                for (int x = 0; x < W; x++) {
+                    if (
+                        !(peak_bot_memory[i].board[y][x] == ME && board[y][x] == player) &&
+                        !(peak_bot_memory[i].board[y][x] == YOU && board[y][x] == player % 2 + 1) &&
+                        !(peak_bot_memory[i].board[y][x] == NOBODY && board[y][x] == EMPTY)
+                    ) {
+                        is_the_same = false;
+                    }
+                    if (
+                        !(peak_bot_memory[i].board[y][W - 1 - x] == ME && board[y][x] == player) &&
+                        !(peak_bot_memory[i].board[y][W - 1 - x] == YOU && board[y][x] == player % 2 + 1) &&
+                        !(peak_bot_memory[i].board[y][W - 1 - x] == NOBODY && board[y][x] == EMPTY)
+                    ) {
+                        is_mirrored = false;
+                    }
+                    if (!is_the_same && !is_mirrored) break;
+                }
+                if (!is_the_same && !is_mirrored) break;
+            }
+
+            if (is_the_same) {
+                return peak_bot_memory[i].move;
+            }
+            if (is_mirrored) {
+                return W - 1 - peak_bot_memory[i].move;
+            }
+
+            // i also was here
+        }
+    }
+
 
     // think
     struct BotReport reports[W];
@@ -361,17 +434,28 @@ int bot_recursion(enum Cell board[H][W], enum Cell player, int depth, int level,
     // memorize
     if (depth == 0 || peak) {
         FILE *afile = fopen(name, "a");
+        struct Situation situation;
+        situation.move = best.move;
         for (int y = 0; y < H; y++) {
             for (int x = 0; x < W; x++) {
                 if (board[y][x] == 0) {
                     fprintf(afile, ".");
+                    situation.board[y][x] = NOBODY;
                 } else if (board[y][x] == player) {
                     fprintf(afile, "M");
+                    situation.board[y][x] = ME;
                 } else {
                     fprintf(afile, "Y");
+                    situation.board[y][x] = YOU;
                 }
             }
         }
+        if (peak) {
+            peak_bot_memory_length++;
+            peak_bot_memory = realloc(peak_bot_memory, peak_bot_memory_length * sizeof(struct Situation));
+            peak_bot_memory[peak_bot_memory_length - 1] = situation;
+        }
+
         fprintf(afile, "%d", best.move);
         //if (danger && !hope) {
         //    fprintf(afile, " 💀");
