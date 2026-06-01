@@ -24,7 +24,34 @@ struct Situation {
 
 struct Situation *peak_bot_memory = NULL;
 int peak_bot_memory_length = 0;
+int peak_bot_memory_capacity = 0;
 bool peak_bot_memory_set = false;
+
+void add_peak_bot_memory(struct Situation situation) {
+    if (peak_bot_memory_length >= peak_bot_memory_capacity) {
+        int new_capacity;
+        if (peak_bot_memory_capacity == 0) {
+            new_capacity = 1024;
+        } else {
+            new_capacity = peak_bot_memory_capacity * 2;
+        }
+
+        struct Situation *new_memory = realloc(
+            peak_bot_memory,
+            new_capacity * sizeof(struct Situation)
+        );
+        if (new_memory == NULL) {
+            fprintf(stderr, "Could not allocate peak_bot_memory\n");
+            exit(1);
+        }
+
+        peak_bot_memory = new_memory;
+        peak_bot_memory_capacity = new_capacity;
+    }
+
+    peak_bot_memory[peak_bot_memory_length] = situation;
+    peak_bot_memory_length++;
+}
 
 void draw(enum Cell board[H][W], enum Cell player, int pointer_x) {
     printf("\033[%dF  ", H + 3);
@@ -266,9 +293,7 @@ int bot_recursion(enum Cell board[H][W], enum Cell player, int depth, int level,
 
                     situation.move = line[W * H] - '0';
 
-                    peak_bot_memory_length++;
-                    peak_bot_memory = realloc(peak_bot_memory, peak_bot_memory_length * sizeof(struct Situation));
-                    peak_bot_memory[peak_bot_memory_length - 1] = situation;
+                    add_peak_bot_memory(situation);
                 }
                 bool is_the_same = true;
                 bool is_mirrored = true;
@@ -451,9 +476,7 @@ int bot_recursion(enum Cell board[H][W], enum Cell player, int depth, int level,
             }
         }
         if (peak) {
-            peak_bot_memory_length++;
-            peak_bot_memory = realloc(peak_bot_memory, peak_bot_memory_length * sizeof(struct Situation));
-            peak_bot_memory[peak_bot_memory_length - 1] = situation;
+            add_peak_bot_memory(situation);
         }
 
         fprintf(afile, "%d", best.move);
