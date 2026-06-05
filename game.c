@@ -276,8 +276,6 @@ int bot_recursion(enum Cell board[H][W], enum Cell player, int depth, int level,
             char line[256] = {0};
             while (fgets(line, sizeof(line), rfile) != NULL) {
                 if (peak && !peak_bot_memory_set) {
-                    // YYMMYMYMYMMYY..YMYM...MYYY...MYY....MMM...6
-
                     struct Situation situation;
 
                     for (int i = 0; i < W * H; i++) {
@@ -288,7 +286,6 @@ int bot_recursion(enum Cell board[H][W], enum Cell player, int depth, int level,
                         } else {
                             situation.board[i / W][i % W] = NOBODY;
                         }
-                             // i was here
                     }
 
                     situation.move = line[W * H] - '0';
@@ -374,8 +371,6 @@ int bot_recursion(enum Cell board[H][W], enum Cell player, int depth, int level,
             if (is_mirrored) {
                 return W - 1 - peak_bot_memory[i].move;
             }
-
-            // i also was here
         }
     }
 
