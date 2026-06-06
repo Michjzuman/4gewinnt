@@ -11,6 +11,8 @@
 #define H 6
 #define SHOW_PROGRESS false
 
+#define NEW_PEAK_BOT_MEMORY_SYSTEM true
+
 enum Cell { EMPTY, RED, YELLOW };
 enum RelativeCell { NOBODY, ME, YOU };
 
@@ -27,30 +29,74 @@ int peak_bot_memory_length = 0;
 int peak_bot_memory_capacity = 0;
 bool peak_bot_memory_set = false;
 
+struct MemoryContainer {
+    enum RelativeCell identifier;
+    int depth;
+    struct MemoryContainer *content;
+    int move;
+    bool initialized;
+};
+
+struct MemoryContainer peak_bot_memory2 = {
+    .initialized = false
+};
+
 void add_peak_bot_memory(struct Situation situation) {
-    if (peak_bot_memory_length >= peak_bot_memory_capacity) {
-        int new_capacity;
-        if (peak_bot_memory_capacity == 0) {
-            new_capacity = 1024;
-        } else {
-            new_capacity = peak_bot_memory_capacity * 2;
+    if (NEW_PEAK_BOT_MEMORY_SYSTEM) {
+        
+        if (!peak_bot_memory2.initialized) {
+            peak_bot_memory2.content = calloc(3, sizeof(struct MemoryContainer));
+            peak_bot_memory2.initialized = true;
         }
 
-        struct Situation *new_memory = realloc(
-            peak_bot_memory,
-            new_capacity * sizeof(struct Situation)
-        );
-        if (new_memory == NULL) {
-            fprintf(stderr, "Could not allocate peak_bot_memory\n");
-            exit(1);
+        struct MemoryContainer *layer = &peak_bot_memory2;
+        for (int y = H - 1; y >= 0; y--) {
+            for (int x = W - 1; x >= 0; x--) {
+                struct MemoryContainer *next_layer = &layer->content[situation.board[y][x]];
+
+                next_layer->identifier = situation.board[y][x];
+                next_layer->depth = layer->depth + 1;
+
+                if (!next_layer->initialized) {
+                    if (next_layer->depth != W * H) {
+                        next_layer->content = calloc(3, sizeof(struct MemoryContainer));
+                    }
+                    next_layer->initialized = true;
+                }
+
+                if (next_layer->depth == W * H) {
+                    next_layer->move = situation.move;
+                }
+
+                layer = next_layer;
+            }
         }
 
-        peak_bot_memory = new_memory;
-        peak_bot_memory_capacity = new_capacity;
+    } else {
+        if (peak_bot_memory_length >= peak_bot_memory_capacity) {
+            int new_capacity;
+            if (peak_bot_memory_capacity == 0) {
+                new_capacity = 1024;
+            } else {
+                new_capacity = peak_bot_memory_capacity * 2;
+            }
+    
+            struct Situation *new_memory = realloc(
+                peak_bot_memory,
+                new_capacity * sizeof(struct Situation)
+            );
+            if (new_memory == NULL) {
+                fprintf(stderr, "Could not allocate peak_bot_memory\n");
+                exit(1);
+            }
+    
+            peak_bot_memory = new_memory;
+            peak_bot_memory_capacity = new_capacity;
+        }
+    
+        peak_bot_memory[peak_bot_memory_length] = situation;
+        peak_bot_memory_length++;
     }
-
-    peak_bot_memory[peak_bot_memory_length] = situation;
-    peak_bot_memory_length++;
 }
 
 void draw(enum Cell board[H][W], enum Cell player, int pointer_x) {
@@ -339,37 +385,84 @@ int bot_recursion(enum Cell board[H][W], enum Cell player, int depth, int level,
 
     // peak_bot search stored memory
     if (peak && depth > 0) {
-        for (int i = 0; i < peak_bot_memory_length; i++) {
-            bool is_the_same = true;
-            bool is_mirrored = true;
+        if (NEW_PEAK_BOT_MEMORY_SYSTEM) {
+            enum Cell mirrored_board[H][W];
 
-            // peak_bot_memory[i].board == board
             for (int y = 0; y < H; y++) {
                 for (int x = 0; x < W; x++) {
-                    if (
-                        !(peak_bot_memory[i].board[y][x] == ME && board[y][x] == player) &&
-                        !(peak_bot_memory[i].board[y][x] == YOU && board[y][x] == player % 2 + 1) &&
-                        !(peak_bot_memory[i].board[y][x] == NOBODY && board[y][x] == EMPTY)
-                    ) {
-                        is_the_same = false;
+                    mirrored_board[y][x] = board[y][W - 1 - x];
+                }
+            }
+
+            for (int i = 0; i < 2; i++) {
+                struct MemoryContainer layer = peak_bot_memory2;
+                bool mirrored = i == 1;
+
+                bool stop = false;
+                for (int y = H - 1; y >= 0; y--) {
+                    for (int x = W - 1; x >= 0; x--) {
+
+                        enum Cell this_one = (
+                            mirrored ? mirrored_board[y][x] : board[y][x]
+                        );
+
+                        enum RelativeCell this_one_but_relative = (
+                            this_one == player ? ME : (
+                                this_one == EMPTY ? NOBODY : YOU
+                            )
+                        );
+                        
+                        layer = layer.content[this_one_but_relative];
+                        
+                        if (!layer.initialized) {
+                            stop = true;
+                            break;
+                        }
+                        
+                        if (layer.depth == W * H) {
+                            return (
+                                mirrored ?
+                                W - 1 - layer.move : layer.move
+                            );
+                        }
                     }
-                    if (
-                        !(peak_bot_memory[i].board[y][W - 1 - x] == ME && board[y][x] == player) &&
-                        !(peak_bot_memory[i].board[y][W - 1 - x] == YOU && board[y][x] == player % 2 + 1) &&
-                        !(peak_bot_memory[i].board[y][W - 1 - x] == NOBODY && board[y][x] == EMPTY)
-                    ) {
-                        is_mirrored = false;
+                    if (stop) break;
+                }
+            }
+
+        } else {
+            for (int i = 0; i < peak_bot_memory_length; i++) {
+                bool is_the_same = true;
+                bool is_mirrored = true;
+                
+                // peak_bot_memory[i].board == board
+                for (int y = 0; y < H; y++) {
+                    for (int x = 0; x < W; x++) {
+                        if (
+                            !(peak_bot_memory[i].board[y][x] == ME && board[y][x] == player) &&
+                            !(peak_bot_memory[i].board[y][x] == YOU && board[y][x] == player % 2 + 1) &&
+                            !(peak_bot_memory[i].board[y][x] == NOBODY && board[y][x] == EMPTY)
+                        ) {
+                            is_the_same = false;
+                        }
+                        if (
+                            !(peak_bot_memory[i].board[y][W - 1 - x] == ME && board[y][x] == player) &&
+                            !(peak_bot_memory[i].board[y][W - 1 - x] == YOU && board[y][x] == player % 2 + 1) &&
+                            !(peak_bot_memory[i].board[y][W - 1 - x] == NOBODY && board[y][x] == EMPTY)
+                        ) {
+                            is_mirrored = false;
+                        }
+                        if (!is_the_same && !is_mirrored) break;
                     }
                     if (!is_the_same && !is_mirrored) break;
                 }
-                if (!is_the_same && !is_mirrored) break;
-            }
-
-            if (is_the_same) {
-                return peak_bot_memory[i].move;
-            }
-            if (is_mirrored) {
-                return W - 1 - peak_bot_memory[i].move;
+                
+                if (is_the_same) {
+                    return peak_bot_memory[i].move;
+                }
+                if (is_mirrored) {
+                    return W - 1 - peak_bot_memory[i].move;
+                }
             }
         }
     }
