@@ -30,8 +30,6 @@ int peak_bot_memory_capacity = 0;
 bool peak_bot_memory_set = false;
 
 struct MemoryContainer {
-    enum RelativeCell identifier;
-    int depth;
     struct MemoryContainer *content;
     int move;
     bool initialized;
@@ -46,6 +44,10 @@ void add_peak_bot_memory(struct Situation situation) {
         
         if (!peak_bot_memory2.initialized) {
             peak_bot_memory2.content = calloc(3, sizeof(struct MemoryContainer));
+            if (peak_bot_memory2.content == NULL) {
+                fprintf(stderr, "Ou shii 👀\n");
+                exit(1);
+            }
             peak_bot_memory2.initialized = true;
         }
 
@@ -54,17 +56,19 @@ void add_peak_bot_memory(struct Situation situation) {
             for (int x = W - 1; x >= 0; x--) {
                 struct MemoryContainer *next_layer = &layer->content[situation.board[y][x]];
 
-                next_layer->identifier = situation.board[y][x];
-                next_layer->depth = layer->depth + 1;
-
                 if (!next_layer->initialized) {
-                    if (next_layer->depth != W * H) {
-                        next_layer->content = calloc(3, sizeof(struct MemoryContainer));
+                    if (!(x == 0 && y == 0)) {
+                        struct MemoryContainer *content = calloc(3, sizeof(struct MemoryContainer));
+                        if (content == NULL) {
+                            fprintf(stderr, "Ou shii 👀\n");
+                            exit(1);
+                        }
+                        next_layer->content = content;
                     }
                     next_layer->initialized = true;
                 }
 
-                if (next_layer->depth == W * H) {
+                if (x == 0 && y == 0) {
                     next_layer->move = situation.move;
                 }
 
@@ -398,35 +402,37 @@ int bot_recursion(enum Cell board[H][W], enum Cell player, int depth, int level,
                 struct MemoryContainer layer = peak_bot_memory2;
                 bool mirrored = i == 1;
 
-                bool stop = false;
-                for (int y = H - 1; y >= 0; y--) {
-                    for (int x = W - 1; x >= 0; x--) {
-
-                        enum Cell this_one = (
-                            mirrored ? mirrored_board[y][x] : board[y][x]
-                        );
-
-                        enum RelativeCell this_one_but_relative = (
-                            this_one == player ? ME : (
-                                this_one == EMPTY ? NOBODY : YOU
-                            )
-                        );
-                        
-                        layer = layer.content[this_one_but_relative];
-                        
-                        if (!layer.initialized) {
-                            stop = true;
-                            break;
-                        }
-                        
-                        if (layer.depth == W * H) {
-                            return (
-                                mirrored ?
-                                W - 1 - layer.move : layer.move
+                if (peak_bot_memory2.initialized) {
+                    bool stop = false;
+                    for (int y = H - 1; y >= 0; y--) {
+                        for (int x = W - 1; x >= 0; x--) {
+    
+                            enum Cell this_one = (
+                                mirrored ? mirrored_board[y][x] : board[y][x]
                             );
+    
+                            enum RelativeCell this_one_but_relative = (
+                                this_one == player ? ME : (
+                                    this_one == EMPTY ? NOBODY : YOU
+                                )
+                            );
+                            
+                            layer = layer.content[this_one_but_relative];
+                            
+                            if (!layer.initialized) {
+                                stop = true;
+                                break;
+                            }
+                            
+                            if (x == 0 && y == 0) {
+                                return (
+                                    mirrored ?
+                                    W - 1 - layer.move : layer.move
+                                );
+                            }
                         }
+                        if (stop) break;
                     }
-                    if (stop) break;
                 }
             }
 
