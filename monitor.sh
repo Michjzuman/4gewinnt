@@ -3,7 +3,18 @@
 
 file=memory0.67
 p=4gewinnt
-refresh=1
+refresh=4
+
+# Auto-quit the solver before it eats the whole machine.
+# It sends SIGTERM first, waits a bit, then SIGKILLs only if needed.
+auto_quit_on_ram_full=true
+quit_at_ram_percent=90
+quit_when_free_percent=2
+quit_grace=8
+quit_log=/tmp/4gewinnt_auto_quit.log
+# Duplicate scans are RAM-heavy; pause them before they fight the solver.
+dup_pause_at_ram_percent=65
+dup_pause_when_free_percent=10
 
 last_lines=0
 last_bytes=0
@@ -116,6 +127,31 @@ C
     clang -O3 -march=native /tmp/4gewinnt_dup_check.c -o "$dup_bin" 2>/dev/null
 }
 
+quit_task() {
+    reason=$1
+    targets=$2
+
+    {
+        echo "$(date '+%Y-%m-%d %H:%M:%S') auto-quitting $p: $reason"
+        echo "pids: $targets"
+    } >> "$quit_log"
+
+    kill -TERM $targets 2>/dev/null
+    sleep "$quit_grace"
+
+    still_running=""
+    for pid in $targets; do
+        if kill -0 "$pid" 2>/dev/null; then
+            still_running="$still_running $pid"
+        fi
+    done
+
+    if [ -n "$still_running" ]; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S') force-killing:$still_running" >> "$quit_log"
+        kill -KILL $still_running 2>/dev/null
+    fi
+}
+
 start_dup_check() {
     now_for_dup=$1
 
@@ -209,8 +245,6 @@ do
     last_bytes=$bytes
     last_time=$now
 
-    start_dup_check "$now"
-
     if [ -f "$dup_state" ]; then
         dupes=$(awk -F= '/^duplicates=/ { print $2 }' "$dup_state")
         dup_checked_at=$(awk -F= '/^checked_at=/ { print $2 }' "$dup_state")
@@ -232,28 +266,75 @@ do
     fi
 
     pids=$(pgrep -x "$p")
+    total_ram_bytes=$(sysctl -n hw.memsize 2>/dev/null || echo 0)
 
     if [ -n "$pids" ]
     then
         proc_count=$(echo "$pids" | wc -l | tr -d ' ')
         cpu=$(ps -o pcpu= -p $pids | awk '{ sum += $1 } END { printf "%.1f%%", sum }')
-        rss=$(ps -o rss= -p $pids | awk '{ sum += $1 } END { printf "%.2f GiB", sum / 1024 / 1024 }')
-        ram=$(footprint -f bytes $pids 2>/dev/null | awk '/phys_footprint:/ { sum += $2 } END { printf "%.2f GB", sum / 1000 / 1000 / 1000 }')
+        rss_kib=$(ps -o rss= -p $pids | awk '{ sum += $1 } END { printf "%.0f", sum }')
+        rss=$(awk -v kb="$rss_kib" 'BEGIN { printf "%.2f GiB", kb / 1024 / 1024 }')
+        proc_phys_bytes=$(footprint -f bytes $pids 2>/dev/null | awk '/phys_footprint:/ { sum += $2 } END { printf "%.0f", sum }')
+        if [ -z "$proc_phys_bytes" ] || [ "$proc_phys_bytes" = "0" ]; then
+            proc_phys_bytes=$((rss_kib * 1024))
+        fi
+        ram=$(awk -v bytes="$proc_phys_bytes" 'BEGIN { printf "%.2f GB", bytes / 1000 / 1000 / 1000 }')
+        proc_ram_percent=$(awk -v used="$proc_phys_bytes" -v total="$total_ram_bytes" 'BEGIN { if (total > 0) printf "%.1f", used * 100 / total; else printf "0.0" }')
         first_pid=$(echo "$pids" | head -1)
         runtime=$(ps -o etime= -p "$first_pid" | awk '{ gsub(/^ +| +$/, ""); print }')
     else
         proc_count=0
         cpu="0.0%"
         rss="0.00 GiB"
+        rss_kib=0
+        proc_phys_bytes=0
         ram="0.00 GB"
+        proc_ram_percent="0.0"
         runtime="not running"
     fi
 
     mem_free=$(memory_pressure -Q 2>/dev/null | awk -F': ' '/System-wide memory free percentage/ { print $2 }')
     [ -z "$mem_free" ] && mem_free="unknown"
+    mem_free_percent=$(printf "%s" "$mem_free" | tr -cd '0-9.')
 
     swap_used=$(sysctl -n vm.swapusage 2>/dev/null | awk '{ print $6 }')
     [ -z "$swap_used" ] && swap_used="unknown"
+
+    dup_guard_reason=""
+    if [ -n "$pids" ] && awk -v used="$proc_ram_percent" -v limit="$dup_pause_at_ram_percent" 'BEGIN { exit !(used >= limit) }'; then
+        dup_guard_reason="task already uses ${proc_ram_percent}% RAM"
+    elif [ -n "$mem_free_percent" ] && awk -v free="$mem_free_percent" -v limit="$dup_pause_when_free_percent" 'BEGIN { exit !(free <= limit) }'; then
+        dup_guard_reason="only ${mem_free} memory free"
+    fi
+
+    if [ -n "$dup_guard_reason" ]; then
+        if [ -f "$dup_pid_file" ] && kill -0 "$(cat "$dup_pid_file")" 2>/dev/null; then
+            kill -TERM "$(cat "$dup_pid_file")" 2>/dev/null
+        fi
+        dup_status="paused: $dup_guard_reason; $dup_status"
+    else
+        start_dup_check "$now"
+    fi
+
+    auto_quit_status="armed at ${quit_at_ram_percent}% task RAM or ${quit_when_free_percent}% free"
+    if [ "$auto_quit_on_ram_full" = true ] && [ -n "$pids" ]; then
+        quit_reason=""
+
+        if awk -v used="$proc_ram_percent" -v limit="$quit_at_ram_percent" 'BEGIN { exit !(used >= limit) }'; then
+            quit_reason="task uses ${proc_ram_percent}% of total RAM"
+        elif [ -n "$mem_free_percent" ] && \
+             awk -v free="$mem_free_percent" -v limit="$quit_when_free_percent" 'BEGIN { exit !(free <= limit) }' && \
+             awk -v used="$proc_ram_percent" 'BEGIN { exit !(used >= 50) }'; then
+            quit_reason="system memory free is ${mem_free}; task uses ${proc_ram_percent}% of total RAM"
+        fi
+
+        if [ -n "$quit_reason" ]; then
+            auto_quit_status="TRIGGERED: $quit_reason"
+            quit_task "$quit_reason" "$pids"
+        fi
+    elif [ "$auto_quit_on_ram_full" != true ]; then
+        auto_quit_status="disabled"
+    fi
 
     disk_free=$(df -h . | awk 'NR == 2 { print $4 }')
 
@@ -276,6 +357,8 @@ do
     echo "cpu usage:       $cpu"
     echo "rss/btop RAM:    $rss"
     echo "activity RAM:    $ram"
+    echo "task RAM share:  ${proc_ram_percent}%"
+    echo "auto quit:       $auto_quit_status"
     printf "line growth:     \033[33m$lines_per_sec\033[0m\n"
     echo "file growth:     $mb_per_sec"
     echo "duplicates:      $dupes"
