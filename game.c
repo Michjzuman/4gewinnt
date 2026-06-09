@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <time.h>
 #include <pthread.h>
+#include <stdint.h>
 
 #define WINNING 4
 #define W 7
@@ -39,37 +40,41 @@ struct MemoryContainer peak_bot_memory2 = {
     .initialized = false
 };
 
+typedef struct {
+    uintptr_t data;
+} MemoryBranch;
+
+MemoryBranch *new_fork() {
+    MemoryBranch *fork = calloc(3, sizeof(MemoryBranch));
+    if (fork == NULL) {
+	fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+    return fork;
+}
+
+MemoryBranch peak_bot_memory3 = {0};
+
 void add_peak_bot_memory(struct Situation situation) {
     if (NEW_PEAK_BOT_MEMORY_SYSTEM) {
         
-        if (!peak_bot_memory2.initialized) {
-            peak_bot_memory2.content = calloc(3, sizeof(struct MemoryContainer));
-            if (peak_bot_memory2.content == NULL) {
-                fprintf(stderr, "Ou shii 👀\n");
-                exit(1);
-            }
-            peak_bot_memory2.initialized = true;
-        }
+        if (peak_bot_memory3.data == 0) {
+	        peak_bot_memory3.data = (uintptr_t)new_fork();
+	    }
 
-        struct MemoryContainer *layer = &peak_bot_memory2;
+        MemoryBranch *layer = &peak_bot_memory3;
         for (int y = H - 1; y >= 0; y--) {
             for (int x = W - 1; x >= 0; x--) {
-                struct MemoryContainer *next_layer = &layer->content[situation.board[y][x]];
+                MemoryBranch *next_layer = &((MemoryBranch *)layer->data)[situation.board[y][x]];
 
-                if (!next_layer->initialized) {
+                if (next_layer->data == 0) {
                     if (!(x == 0 && y == 0)) {
-                        struct MemoryContainer *content = calloc(3, sizeof(struct MemoryContainer));
-                        if (content == NULL) {
-                            fprintf(stderr, "Ou shii 👀\n");
-                            exit(1);
-                        }
-                        next_layer->content = content;
+                        next_layer->data = (uintptr_t)new_fork();
                     }
-                    next_layer->initialized = true;
                 }
 
                 if (x == 0 && y == 0) {
-                    next_layer->move = situation.move;
+                    next_layer->data = situation.move + 1;
                 }
 
                 layer = next_layer;
@@ -399,10 +404,10 @@ int bot_recursion(enum Cell board[H][W], enum Cell player, int depth, int level,
             }
 
             for (int i = 0; i < 2; i++) {
-                struct MemoryContainer layer = peak_bot_memory2;
+                MemoryBranch *layer = &peak_bot_memory3;
                 bool mirrored = i == 1;
 
-                if (peak_bot_memory2.initialized) {
+                if (peak_bot_memory3.data != 0) {
                     bool stop = false;
                     for (int y = H - 1; y >= 0; y--) {
                         for (int x = W - 1; x >= 0; x--) {
@@ -417,9 +422,9 @@ int bot_recursion(enum Cell board[H][W], enum Cell player, int depth, int level,
                                 )
                             );
                             
-                            layer = layer.content[this_one_but_relative];
+                            layer = &((MemoryBranch *)layer->data)[this_one_but_relative];
                             
-                            if (!layer.initialized) {
+	  		                if (layer->data == 0) {
                                 stop = true;
                                 break;
                             }
@@ -427,7 +432,7 @@ int bot_recursion(enum Cell board[H][W], enum Cell player, int depth, int level,
                             if (x == 0 && y == 0) {
                                 return (
                                     mirrored ?
-                                    W - 1 - layer.move : layer.move
+                                    W - (int)layer->data : (int)layer->data - 1
                                 );
                             }
                         }
