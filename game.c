@@ -47,7 +47,7 @@ typedef struct {
 MemoryBranch *new_fork() {
     MemoryBranch *fork = calloc(3, sizeof(MemoryBranch));
     if (fork == NULL) {
-	fprintf(stderr, "Out of memory\n");
+        fprintf(stderr, "Out of memory\n");
         exit(1);
     }
     return fork;
